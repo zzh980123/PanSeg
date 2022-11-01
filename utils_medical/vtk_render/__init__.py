@@ -1,0 +1,2 @@
+from utils_medical import vtk_render
+vtk_render
