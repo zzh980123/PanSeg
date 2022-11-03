@@ -28,7 +28,7 @@ class DaFormaerCoATNet(nn.Module):
                  in_channel=3,
                  out_channel=3,
                  encoder=coat_lite_medium,
-                 encoder_pretrain='coat_lite_medium_384x384_f9129688.pth',
+                 encoder_pretrain=None,
                  decoder=daformer_conv3x3,
                  decoder_dim=320):
         super(DaFormaerCoATNet, self).__init__()
@@ -53,7 +53,6 @@ class DaFormaerCoATNet(nn.Module):
             self.encoder.load_state_dict(checkpoint['model'], strict=False)
 
     def forward(self, x):
-        x = self.rgb(x)
         encode_info = self.encoder(x)
 
         last, decode_info = self.decoder(encode_info)
