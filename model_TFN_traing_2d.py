@@ -87,7 +87,7 @@ def main():
 
     # %% set training/validation split
     np.random.seed(args.seed)
-    model_path = join(args.work_dir, args.model_name + "_1class")
+    model_path = join(args.work_dir, args.model_name + "_TFNv1")
     os.makedirs(model_path, exist_ok=True)
     run_id = datetime.now().strftime("%Y%m%d-%H%M")
     shutil.copyfile(
@@ -195,9 +195,9 @@ def main():
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # TSFModel =
+    model = TransFlowNet(args.model_name.lower(), device, args, in_channels=1)
 
-    model = model_factory(args.model_name.lower(), device, args, in_channels=1)
+    # model = model_factory(args.model_name.lower(), device, args, in_channels=1)
 
     # loss_function = monai.losses.DiceCELoss(softmax=True).to(device)
     loss_function = monai.losses.DiceCELoss(sigmoid=True)
@@ -225,7 +225,7 @@ def main():
             optimizer.zero_grad()
             # inputs = stain_model(inputs).to(device)
 
-            outputs = model(inputs)
+            _, outputs = model(inputs)
             # labels_onehot = monai.networks.one_hot(
             #     labels, args.num_class
             # )  # (b,cls,256,256)
@@ -259,7 +259,7 @@ def main():
                 val_images = None
                 val_labels = None
                 val_outputs = None
-
+                val_hidden_feature = None
 
                 for step, val_data in enumerate(val_loader, 1):
                     val_images, val_labels = val_data["img"].to(device), val_data["label"].to(device)
@@ -270,10 +270,12 @@ def main():
                     roi_size = (args.input_size, args.input_size)
                     sw_batch_size = args.batch_size
 
-                    val_outputs = sliding_window_inference(
+                    val_hidden_feature, val_outputs = sliding_window_inference(
                         val_images, roi_size, sw_batch_size, model
                     )
                     val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
+                    val_hidden_feature = [post_pred(i) for i in decollate_batch(val_hidden_feature)]
+
                     val_labels_onehot = [
                         post_gt(i) for i in decollate_batch(val_labels_onehot)
                     ]
@@ -314,6 +316,7 @@ def main():
                 plot_2d_or_3d_image(val_images, epoch, writer, index=0, tag="image")
                 plot_2d_or_3d_image(val_labels, epoch, writer, index=0, tag="label")
                 plot_2d_or_3d_image(val_outputs, epoch, writer, index=0, tag="output", max_channels=3)
+                plot_2d_or_3d_image(val_hidden_feature, epoch, writer, index=0, tag="hidden")
             if (epoch - best_metric_epoch) > epoch_tolerance:
                 print(
                     f"validation metric does not improve for {epoch_tolerance} epochs! current {epoch=}, {best_metric_epoch=}"
