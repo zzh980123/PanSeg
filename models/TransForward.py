@@ -6,11 +6,62 @@ import torch.nn.functional as F
 from einops import rearrange
 import flow
 import common
+from model_selector import *
 import layers
 
-class TSFNet(nn.Module):
-    def __init__(self, device=None, in_channels=1, hidden_dim=32, out_channels=4, max_scaling=4):
-        super(TSFNet, self).__init__()
+
+class TransBack(nn.Module):
+    def __init__(self, in_channels, out_channels, max_scaling=4):
+        super(TransBack, self).__init__()
+        self.max_scaling = max_scaling
+        self.min_scaling = 1 / max_scaling
+        self.M = math.log2(max_scaling)
+        self.flatten_pt = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, padding=0)
+
+        self.laterconv = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1)
+
+        self.dyn_flow_shape = True
+
+    def get_st_flows(self, shape_, device):
+        if self.dyn_flow_shape:
+            self.register_buffer('s_flow', nn.Parameter(flow.gen_flow_scale(shape_[2:]), requires_grad=False))
+            self.register_buffer('t_flow', nn.Parameter(flow.gen_flow_transport(shape_[2:]), requires_grad=False))
+            self.trans = flow.SpatialTransformer(shape_[2:], mode='nearest')
+
+            self.s_flow = self.s_flow.to(device)
+            self.t_flow = self.t_flow.to(device)
+            self.dyn_flow_shape = False
+
+        return self.s_flow, self.t_flow
+
+    def forward(self, x, params):
+        shape_ = x.shape
+
+        xy, s, c = params[:, 0:2, ...], params[:, 2:3, ...], params[:, 3:4, ...]
+
+        xy_normal = torch.sigmoid(xy) - 0.5
+        s_normal = torch.exp2(self.M * (2 * torch.sigmoid(s) - 1))
+
+        for i in range(xy_normal.shape[1]):
+            xy_normal[:, i, ...] *= shape_[i + 2]
+
+        s_flow, t_flow = self.get_st_flows(shape_, x.device)
+
+        s_flow = flow.trans_s_flow(s_flow, 1 / s_normal)
+        t_flow = flow.trans_t_flow(t_flow, -1 * xy_normal)
+
+        flatten_ps = self.flatten_pt(x)
+
+        trans_back = self.trans(self.trans(flatten_ps, s_flow), t_flow)
+        ff = self.laterconv(trans_back)
+
+        return trans_back, ff
+
+
+
+class TransForward(nn.Module):
+    def __init__(self, in_channels=1, hidden_dim=32, out_channels=4, max_scaling=4):
+        super(TransForward, self).__init__()
 
         self.max_scaling = max_scaling
         self.min_scaling = 1 / max_scaling
@@ -96,19 +147,34 @@ class TSFNet(nn.Module):
 
         flatten_ps = self.flatten_pt(feat)
 
-        trans_fps = self.trans(self.trans(flatten_ps, t_flow), s_flow)
-        trans_fps = self.later_conv2(self.later_conv1(trans_fps))
-        trans_fps = self.normal2(trans_fps)
+        trans_f = self.trans(self.trans(flatten_ps, t_flow), s_flow)
+        trans_f = self.later_conv2(self.later_conv1(trans_f))
+        trans_f = self.normal2(trans_f)
 
-        return trans_fps, params
+        return trans_f, params
 
+
+class TransFlowNet(nn.Module):
+    def __init__(self, model_name: str, device, args, in_channels=1, out_channels=1, spatial_dims=2):
+        super(TransFlowNet, self).__init__()
+
+        self.model = model_factory(model_name, device, args, in_channels)
+        self.trans_forward = TransForward(in_channels, hidden_dim=32, out_channels=4, max_scaling=4).to(device)
+        self.trans_back = TransBack(in_channels=in_channels, out_channels=out_channels).to(device)
+
+    def forward(self, x):
+        trans_f, params = self.trans_forward(x)
+        feature = self.model(trans_f)
+        trans_b, output = self.trans_back(feature, params)
+        return feature, output
 
 
 
 if __name__ == '__main__':
     input = torch.randn((4, 1, 512, 512))
-    model = TSFNet()
-    _, _ = model(input)
+    model = TransFlowNet('unet')
+    a, b = model(input)
+    print("a")
     
 
 

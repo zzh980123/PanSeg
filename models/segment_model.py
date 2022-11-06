@@ -160,7 +160,6 @@ class ScaleBackConvLayer(nn.Module):
     #     return self.s_flow, self.t_flow
 
     def get_st_flows(self, shape_, device):
-
         if self.dyn_flow_shape:
             self.register_buffer('s_flow', nn.Parameter(flow.gen_flow_scale(shape_[2:]), requires_grad=False))
             self.register_buffer('t_flow', nn.Parameter(flow.gen_flow_transport(shape_[2:]), requires_grad=False))

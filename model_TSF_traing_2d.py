@@ -9,7 +9,7 @@ import os
 import tqdm
 
 from models.model_selector import *
-
+from models.TransForward import *
 
 def main():
     parser = argparse.ArgumentParser("Microscopy image segmentation")
@@ -194,6 +194,8 @@ def main():
     post_gt = Compose([EnsureType(), AsDiscrete(to_onehot=None)])
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # TSFModel =
 
     model = model_factory(args.model_name.lower(), device, args, in_channels=1)
 
