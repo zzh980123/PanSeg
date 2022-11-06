@@ -1,7 +1,7 @@
 import monai
 from monai.networks.nets import *
 from monai.networks.blocks import Warp
-from .daformer_coat_net import *
+from daformer_coat_net import *
 
 
 def model_factory(model_name: str, device, args, in_channels=1, spatial_dims=2, pretrained_model_paths=[]):

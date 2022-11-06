@@ -9,7 +9,7 @@ import os
 import tqdm
 
 from models.model_selector import *
-from models.TransForward import *
+from models.TransFlowNet import *
 
 def main():
     parser = argparse.ArgumentParser("Microscopy image segmentation")
