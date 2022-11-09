@@ -128,6 +128,36 @@ def trans_s_flow(grid, scale):
     return grid * (1 - 1 / scale)
 
 
+def get_s(label):
+    size = label.shape[2] * label.shape[3]
+    b = label.shape[0]
+    s = [0.4 * size / torch.count_nonzero(label[i]) for i in range(b)]
+    s = torch.stack(s).reshape((b, 1, 1, 1))
+    s = torch.sqrt(s)
+    s = torch.clip(s, 0.25, 4)
+    return s
+
+
+def get_t(label):
+    b = label.shape[0]
+    mid = label.shape[-1] // 2
+
+    zx = torch.any(label, dim=-1)
+    midx = [torch.where(zx[i]) for i in range(b)]
+    middx = [((midx[i][1][0] + midx[i][1][-1]) / 2 - mid) if midx[i][1].__len__() > 0 else torch.tensor(0)
+             for i in range(len(midx))]
+    midx = torch.stack(middx).reshape(b, 1, 1, 1)
+
+    zy = torch.any(label, dim=-2)
+    midy = [torch.where(zy[i]) for i in range(b)]
+    middy = [((midy[i][1][0] + midy[i][1][-1]) / 2 - mid) if midy[i][1].__len__() > 0 else torch.tensor(0)
+             for i in range(len(midy))]
+    midy = torch.stack(middy).reshape(b, 1, 1, 1)
+
+    xy_normal = torch.concat([midx, midy], 1)
+    return xy_normal
+
+
 if __name__ == '__main__':
     import utils_medical.preproccess as prp
     import utils_medical.plot as plot

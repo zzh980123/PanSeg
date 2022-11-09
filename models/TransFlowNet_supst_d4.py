@@ -58,31 +58,34 @@ class TransBack(nn.Module):
         return trans_back, ff
 
 
-
 class TransForward(nn.Module):
-    def __init__(self, in_channels=1, hidden_dim=32, out_channels=4, max_scaling=4):
+    def __init__(self, in_channels=1, hidden_dim=16, out_channels=4, max_scaling=4):
         super(TransForward, self).__init__()
 
+        self.h = [2]
         self.max_scaling = max_scaling
         self.min_scaling = 1 / max_scaling
         assert self.max_scaling > 0
         self.M = math.log2(self.max_scaling)
 
-        self.conv_span = nn.Conv2d(in_channels, hidden_dim, kernel_size=3, padding=1)
-        self.conv_reduce1 = nn.Conv2d(hidden_dim, out_channels, kernel_size=3, padding=1)
+        # self.conv_span = nn.Conv2d(in_channels, hidden_dim, kernel_size=3, padding=1)
+        # self.conv_span2 = nn.Conv2d(hidden_dim, hidden_dim*2, kernel_size=3, padding=1)
+        # self.conv_reduce = nn.Conv2d(hidden_dim, out_channels, kernel_size=1, padding=0)
+        # self.reg_inv = common.Involution(channels=hidden_dim, kernel_size=7, stride=1, group_channels=4)
 
-        self.normal1 = nn.BatchNorm2d(hidden_dim)
+        self.conv_span = nn.Conv2d(in_channels, hidden_dim // 2, kernel_size=3, padding=1)
+        self.downSample1 = common.Down(hidden_dim // 2, hidden_dim)
+        self.downSample2 = common.Down(hidden_dim, hidden_dim * 2)
+        self.downSample3 = common.Down(hidden_dim * 2, hidden_dim * 4)
+        self.downSample4 = common.Down(hidden_dim * 4, hidden_dim * 8)
+        self.upSample1 = common.Up(hidden_dim * 8, hidden_dim * 4, False)
+        self.upSample2 = common.Up(hidden_dim * 4, hidden_dim * 2, False)
+        self.upSample3 = common.Up(hidden_dim * 2, hidden_dim, False)
+        self.upSample4 = common.Up(hidden_dim, out_channels, False)
 
-        self.conv_reduce2 = nn.Conv2d(hidden_dim, out_channels, kernel_size=1, padding=0)
-        self.reg_inv = common.Involution(channels=hidden_dim, kernel_size=7, stride=1)
-
-        self.reg = nn.Conv2d(in_channels=out_channels, out_channels=4, kernel_size=1, padding=0)
         self.max_pooling = nn.AdaptiveMaxPool2d(1, return_indices=True)
 
         self.flatten_pt = nn.Conv2d(in_channels=4, out_channels=4, kernel_size=1, padding=0)
-
-        self.later_conv1 = nn.Conv2d(4, 4, kernel_size=3, padding=1)
-        self.later_conv2 = nn.Conv2d(4, 1, kernel_size=1, padding=0)
 
         self.normal2 = nn.BatchNorm2d(1)
 
@@ -117,13 +120,22 @@ class TransForward(nn.Module):
         ori_shape = x.shape
         ori_feature = x
 
-        x = self.conv_span(x)  # (b, 32, 512, 512)
-        feat = self.conv_reduce1(x)  # h (b, 4, 512, 512)
-        feat = F.leaky_relu(feat)
+        # x = self.conv_span(x)  # (b, 16, 512, 512)
+        # # involution
+        # x = self.normal1(x)
+        # params = self.conv_reduce(self.reg_inv(x))  # params (b, 4, 512, 512)
 
-        x = self.normal1(x)
+        # unet-like down4
+        x = self.conv_span(x)  # (b, 8, 512, 512)
+        d1 = self.downSample1(x)  # (b, 16, 256, 256)
+        d2 = self.downSample2(d1)  # (b, 32, 128, 128)
+        d3 = self.downSample3(d2)  # (b, 64, 64, 64)
+        d4 = self.downSample4(d3)  # (b, 128, 32, 32)
 
-        params = self.conv_reduce2(self.reg_inv(x))  # params (b, 4, 512, 512)
+        u1 = self.upSample1(d4, d3)  # (b, 64, 64, 64)
+        u2 = self.upSample2(u1, d2)  # (b, 32, 128, 128)
+        u3 = self.upSample3(u2, d1)  # (b, 16, 256, 256)
+        params = self.upSample4(u3, x)  # (b, 4, 512, 512)
 
         b, c, h, w = params.shape
         _, max_index = self.max_pooling(params[:, 3:, ...])  # 最后一个通道的最大值序号
@@ -133,7 +145,7 @@ class TransForward(nn.Module):
         idx2 = torch.arange(c).view(1, -1, 1)
         params = flatten_feature[idx1, idx2, max_index]  # 取每个Batch和Channel下max_index所在值  (b, 4, 1)
 
-        xy, s, _ = params[:, 0:2, ...], params[:, 2:3, ...], params[:, 3:, ...]
+        xy, s = params[:, 0:2, ...], params[:, 2:3, ...]
 
         xy_normal = torch.sigmoid(xy) - 0.5
         s_normal = torch.exp2(self.M * (2 * torch.sigmoid(s) - 1))
@@ -145,32 +157,21 @@ class TransForward(nn.Module):
         s_flow = flow.trans_s_flow(s_flow, s_normal)
         t_flow = flow.trans_t_flow(t_flow, xy_normal)
 
-        flatten_ps = self.flatten_pt(feat)
-
-        trans_f = self.trans(self.trans(flatten_ps, t_flow), s_flow)
-        trans_f = self.later_conv2(self.later_conv1(trans_f))
-        trans_f = self.normal2(trans_f)
-
-        return trans_f, params
+        trans_f = self.trans(self.trans(ori_feature, t_flow), s_flow)
+        return trans_f, params, s_normal, xy_normal
 
 
 class TransFlowNet(nn.Module):
-    def __init__(self, model_name: str, device, args, in_channels=1, out_channels=1, spatial_dims=2):
+    def __init__(self, model_name: str, device, args, in_channels=1, out_channels=1, hidden_dim=16, spatial_dims=2):
         super(TransFlowNet, self).__init__()
 
         self.model = model_factory(model_name, device, args, in_channels)
-        self.trans_forward = TransForward(in_channels, hidden_dim=32, out_channels=4, max_scaling=4).to(device)
+        self.trans_forward = TransForward(in_channels, hidden_dim=hidden_dim, out_channels=4, max_scaling=4).to(device)
         self.trans_back = TransBack(in_channels=in_channels, out_channels=out_channels).to(device)
 
     def forward(self, x):
-        trans_f, params = self.trans_forward(x)
+        trans_f, params, s_normal, xy_normal = self.trans_forward(x)
         feature = self.model(trans_f)
         trans_b, output = self.trans_back(feature, params)
-        return feature, output
-
-
-
-
-
-
+        return trans_f, feature, output, s_normal, xy_normal
 
