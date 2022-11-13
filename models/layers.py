@@ -163,7 +163,6 @@ class DSConv2d(nn.Module):
 
 
 class HugeConv2dBlock(nn.Module):
-
     def __init__(self, in_channel, out_channel, kernel_size=(31, 31), small_ks=5):
         super().__init__()
         self.w, self.h = kernel_size

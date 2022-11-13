@@ -1,8 +1,8 @@
 import math
 import torch
 import torch.nn as nn
+from typing import Union
 import torch.nn.functional as F
-
 
 
 def autopad(k, p=None):  # kernel, padding
@@ -114,6 +114,45 @@ class Involution(nn.Module):
         return out
 
 
+class DSConv2d(nn.Module):
+    def __init__(self,
+                 in_channel,
+                 out_channel,
+                 kernel_size,
+                 stride=1,
+                 padding: Union[str, int, tuple] = 0,
+                 dilation=1
+                 ):
+        super().__init__()
+
+        self.dconv = nn.Sequential(
+            nn.Conv2d(in_channels=in_channel, out_channels=in_channel, kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation, groups=in_channel),
+            nn.Conv2d(in_channel, out_channel, kernel_size=1, stride=1, padding=0),
+        )
+
+    def forward(self, x):
+        x = self.dconv(x)
+        return x
+
+
+class HugeConv2dBlock(nn.Module):
+    def __init__(self, in_channel, out_channel, kernel_size=(31, 31), small_ks=5):
+        super().__init__()
+        self.w, self.h = kernel_size
+        self.conv0 = DSConv2d(in_channel, out_channel, (self.w, small_ks), padding="same")
+        self.conv1 = DSConv2d(in_channel, out_channel, (small_ks, self.h), padding="same")
+        self.sconv = nn.Conv2d(in_channel, out_channel, (small_ks, small_ks), padding="same")
+        self.bn = nn.BatchNorm2d(out_channel)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        main_path = self.conv0(x)
+        main_path = main_path + self.conv1(x)
+        path = self.sconv(x)
+        out = self.relu(self.bn(path + main_path))
+        return out
+
+
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
@@ -157,6 +196,40 @@ class Up(nn.Module):
         # if bilinear, use the normal convolutions to reduce the number of channels
         if bilinear:
             self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+            self.conv = HugeConv2dBlock(in_channels, out_channels)
+        else:
+            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+            self.conv = HugeConv2dBlock(in_channels, out_channels)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
+
+
+class HugeDown(nn.Module):
+    """Downscaling with maxpool then double conv"""
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.maxpool_conv = nn.Sequential(
+            nn.MaxPool2d(2),
+            HugeConv2dBlock(in_channels, out_channels)
+        )
+
+    def forward(self, x):
+        return self.maxpool_conv(x)
+
+
+class HugeUp(nn.Module):
+    """Upscaling then double conv"""
+
+    def __init__(self, in_channels, out_channels, bilinear=True):
+        super().__init__()
+
+        # if bilinear, use the normal convolutions to reduce the number of channels
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
             self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
         else:
             self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
@@ -164,14 +237,9 @@ class Up(nn.Module):
 
     def forward(self, x1, x2):
         x1 = self.up(x1)
-        # input is CHW
-        # diffY = x2.size()[2] - x1.size()[2]
-        # diffX = x2.size()[3] - x1.size()[3]
-        #
-        # x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
-        #                 diffY // 2, diffY - diffY // 2])
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
+
 
 
 if __name__ == '__main__':
