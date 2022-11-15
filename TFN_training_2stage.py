@@ -230,9 +230,15 @@ def main():
             # sup s_normal xy_normal
             s = flow.get_s(labels)
             xy = flow.get_t(labels.cpu()).to(device).float()
-            trans_f, trans_f_label, hidden_feature, outputs, s_normal, xy_normal = model(inputs, labels)
+            trans_f, trans_f_label, hidden_feature, outputs, xy_normal, s_normal, coarse_seg = model(inputs, labels)
 
-            loss = loss_function(outputs, labels) + loss_function(trans_f, trans_f_label) + 0.1 * sloss_function(s_normal, s) + 0.001 * sloss_function(xy_normal, xy)
+            loss1 = 2 * loss_function(coarse_seg, labels) + loss_function(outputs, labels)
+            loss2 = loss_function(outputs, labels) + loss_function(trans_f, trans_f_label)
+            # loss3 = 0.1 * sloss_function(s_normal, s) + 0.001 * sloss_function(xy_normal, xy)
+            loss = loss1 if epoch <= 50 else loss2
+            # if epoch > 50:
+            #     for param in model.trans_forward.parameters():
+            #         param.requires_grad = False
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -251,7 +257,7 @@ def main():
             "loss": epoch_loss_values,
         }
 
-        if epoch >= 10 and epoch % val_interval == 0:
+        if epoch >= 20 and epoch % val_interval == 0:
             model.eval()
             with torch.no_grad():
                 val_images = None
@@ -260,16 +266,18 @@ def main():
                 val_hidden_feature = None
                 val_forward = None
                 val_forward_label = None
+                val_coarse_seg = None
 
                 for step, val_data in enumerate(val_loader, 1):
                     val_images, val_labels = val_data["img"].to(device), val_data["label"].float().to(device)
 
                     val_labels_onehot = val_labels
 
-                    val_forward, val_forward_label, val_hidden_feature, val_outputs, s_normal, xy_normal = model(val_images, val_labels)
+                    val_forward, val_forward_label, val_hidden_feature, val_outputs, xy_normal, s_normal, coarse_seg = model(val_images, val_labels)
                     val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
                     val_hidden_feature = [post_pred(i) for i in decollate_batch(val_hidden_feature)]
                     val_forward = [i for i in decollate_batch(val_forward)]
+                    val_coarse_seg = [i for i in decollate_batch(coarse_seg)]
 
                     val_labels_onehot = [
                         post_gt(i) for i in decollate_batch(val_labels_onehot)
@@ -304,6 +312,7 @@ def main():
                 plot_2d_or_3d_image(val_hidden_feature, epoch, writer, index=0, tag="hidden")
                 plot_2d_or_3d_image(val_forward, epoch, writer, index=0, tag="forward")
                 plot_2d_or_3d_image(val_forward_label, epoch, writer, index=0, tag="forward_label")
+                plot_2d_or_3d_image(val_coarse_seg, epoch, writer, index=0, tag="coarse_seg")
             if (epoch - best_metric_epoch) > epoch_tolerance:
                 print(
                     f"validation metric does not improve for {epoch_tolerance} epochs! current {epoch=}, {best_metric_epoch=}"

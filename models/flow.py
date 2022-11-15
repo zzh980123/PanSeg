@@ -158,6 +158,27 @@ def get_t(label):
     return xy_normal
 
 
+def get_normal_image(feature, k, M):
+    b, c, h, w = feature.shape
+    mid = h // 2
+    flatten_features = feature.view((b, c, -1))
+    _, topk_index = torch.topk(flatten_features[:, 1:, ...], k)
+    y = topk_index // w
+    x = topk_index - y * w
+    mean_y = (torch.mean(y.float(), -1) - mid).reshape(b, 1, 1, 1)
+    mean_x = (torch.mean(x.float(), -1) - mid).reshape(b, 1, 1, 1)
+    xy_normal = torch.concat([mean_y, mean_x], 1)
+
+    idx1 = torch.arange(b).view(-1, 1, 1)
+    idx2 = torch.arange(c).view(1, -1, 1)
+    params = flatten_features[idx1, idx2, topk_index]
+    params = torch.mean(params, -1).view(b, c, 1, 1)
+    s = params[:, 0:1, ...]
+    s_normal = torch.exp2(M * (2 * torch.sigmoid(s) - 1))
+
+    return xy_normal, s_normal
+
+
 if __name__ == '__main__':
     import utils_medical.preproccess as prp
     import utils_medical.plot as plot
@@ -183,6 +204,6 @@ if __name__ == '__main__':
 
     import matplotlib.pyplot as plt
 
-    plt.imshow(np_new[0, :, ...] / 255)
+    plt.imshow(np_new[0, :, ...] * 255)
     plt.show()
     plot.flow([np_flow[0, ::32, ::32, ...]], width=5)

@@ -28,33 +28,25 @@ class TransBack(nn.Module):
             self.s_flow = self.s_flow.to(device)
             self.t_flow = self.t_flow.to(device)
             self.dyn_flow_shape = False
-
         return self.s_flow, self.t_flow
 
-    def forward(self, x, params):
+    def forward(self, x, xy_normal, s_normal):
         shape_ = x.shape
-
-        xy, s, c = params[:, 0:2, ...], params[:, 2:3, ...], params[:, 3:4, ...]
-
-        xy_normal = torch.sigmoid(xy) - 0.5
-        s_normal = torch.exp2(self.M * (2 * torch.sigmoid(s) - 1))
-
         for i in range(xy_normal.shape[1]):
             xy_normal[:, i, ...] *= shape_[i + 2]
 
         s_flow, t_flow = self.get_st_flows(shape_, x.device)
-
         s_flow = flow.trans_s_flow(s_flow, 1 / s_normal)
         t_flow = flow.trans_t_flow(t_flow, -1 * xy_normal)
-
         trans_back = self.trans(self.trans(x, s_flow), t_flow)
+
         output = self.later_conv(trans_back)
 
         return output
 
 
 class TransForward(nn.Module):
-    def __init__(self, in_channels=1, hidden_dim=16, out_channels=4, max_scaling=4):
+    def __init__(self, in_channels=1, hidden_dim=16, out_channels=2, max_scaling=4):
         super(TransForward, self).__init__()
 
         self.h = [2]
@@ -62,11 +54,6 @@ class TransForward(nn.Module):
         self.min_scaling = 1 / max_scaling
         assert self.max_scaling > 0
         self.M = math.log2(self.max_scaling)
-
-        # self.conv_span = nn.Conv2d(in_channels, hidden_dim, kernel_size=3, padding=1)
-        # self.conv_span2 = nn.Conv2d(hidden_dim, hidden_dim*2, kernel_size=3, padding=1)
-        # self.conv_reduce = nn.Conv2d(hidden_dim, out_channels, kernel_size=1, padding=0)
-        # self.reg_inv = common.Involution(channels=hidden_dim, kernel_size=7, stride=1, group_channels=4)
 
         self.conv_span = nn.Conv2d(in_channels, hidden_dim // 2, kernel_size=3, padding=1)
         self.downSample1 = common.Down(hidden_dim // 2, hidden_dim)
@@ -134,24 +121,10 @@ class TransForward(nn.Module):
         u1 = self.upSample1(u0, d3)  # (b, 64, 64, 64)
         u2 = self.upSample2(u1, d2)  # (b, 32, 128, 128)
         u3 = self.upSample3(u2, d1)  # (b, 16, 256, 256)
-        params = self.upSample4(u3, x)  # (b, 4, 512, 512)
+        features = self.upSample4(u3, x)  # (b, 2, 512, 512)          c:0 coarse seg        c:1 learned scale size
+        coarse_seg = features[:, 0, ...].unsqueeze(1)
 
-        b, c, h, w = params.shape
-        flatten_feature = rearrange(params, 'b c h w -> b c (h w)')
-        _, top10_index = torch.topk(flatten_feature[:, 3:, ...], 10)
-
-        idx1 = torch.arange(b).view(-1, 1, 1)
-        idx2 = torch.arange(c).view(1, -1, 1)
-        params = flatten_feature[idx1, idx2, top10_index]
-        params = torch.mean(params, -1).view(b, c, 1, 1)
-
-        xy, s = params[:, 0:2, ...], params[:, 2:3, ...]
-
-        xy_normal = torch.sigmoid(xy) - 0.5
-        s_normal = torch.exp2(self.M * (2 * torch.sigmoid(s) - 1))
-
-        for i in range(xy_normal.shape[1]):
-            xy_normal[:, i, ...] *= ori_shape[i + 2]  # 位移变换场需乘上原图的h w
+        xy_normal, s_normal = flow.get_normal_image(features, 20, self.M)
 
         s_flow, t_flow = self.get_st_flows(ori_shape, x.device)
         s_flow = flow.trans_s_flow(s_flow, s_normal)
@@ -159,7 +132,7 @@ class TransForward(nn.Module):
 
         trans_f = self.trans(self.trans(ori_feature, t_flow), s_flow)
         trans_f_label = self.trans(self.trans(label, t_flow), s_flow)
-        return trans_f, trans_f_label, params, s_normal, xy_normal
+        return trans_f, trans_f_label, xy_normal, s_normal, coarse_seg
 
 
 class TransFlowNet(nn.Module):
@@ -167,12 +140,12 @@ class TransFlowNet(nn.Module):
         super(TransFlowNet, self).__init__()
 
         self.model = model_factory(model_name, device, args, in_channels)
-        self.trans_forward = TransForward(in_channels, hidden_dim=hidden_dim, out_channels=4, max_scaling=4).to(device)
+        self.trans_forward = TransForward(in_channels, hidden_dim=hidden_dim, out_channels=2, max_scaling=4).to(device)
         self.trans_back = TransBack(in_channels=in_channels, out_channels=out_channels).to(device)
 
     def forward(self, x, label):
-        trans_f, trans_f_label, params, s_normal, xy_normal = self.trans_forward(x, label)
+        trans_f, trans_f_label, xy_normal, s_normal, coarse_seg = self.trans_forward(x, label)
         hidden_feature = self.model(trans_f)
-        output = self.trans_back(hidden_feature, params)
-        return trans_f, trans_f_label, hidden_feature, output, s_normal, xy_normal
+        output = self.trans_back(hidden_feature, xy_normal, s_normal)
+        return trans_f, trans_f_label, hidden_feature, output, xy_normal, s_normal, coarse_seg
 

@@ -137,7 +137,7 @@ class TransForward(nn.Module):
         flatten_feature = rearrange(params, 'b c h w -> b c (h w) 1')
         idx1 = torch.arange(b).view(-1, 1, 1)
         idx2 = torch.arange(c).view(1, -1, 1)
-        params = flatten_feature[idx1, idx2, max_index]  # 取每个Batch和Channel下max_index所在值  (b, 4, 1)
+        params = flatten_feature[idx1, idx2, max_index]  # 取每个Batch和Channel下max_index所在值  (b, 4, 1, 1)
 
         xy, s = params[:, 0:2, ...], params[:, 2:3, ...]
 

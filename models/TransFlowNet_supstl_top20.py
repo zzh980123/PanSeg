@@ -138,11 +138,11 @@ class TransForward(nn.Module):
 
         b, c, h, w = params.shape
         flatten_feature = rearrange(params, 'b c h w -> b c (h w)')
-        _, top10_index = torch.topk(flatten_feature[:, 3:, ...], 10)
+        _, topk_index = torch.topk(flatten_feature[:, 3:, ...], 20)
 
         idx1 = torch.arange(b).view(-1, 1, 1)
         idx2 = torch.arange(c).view(1, -1, 1)
-        params = flatten_feature[idx1, idx2, top10_index]
+        params = flatten_feature[idx1, idx2, topk_index]
         params = torch.mean(params, -1).view(b, c, 1, 1)
 
         xy, s = params[:, 0:2, ...], params[:, 2:3, ...]
