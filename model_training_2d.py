@@ -227,12 +227,11 @@ def main():
             # labels_onehot = monai.networks.one_hot(
             #     labels, args.num_class
             # )  # (b,cls,256,256)
-            labels_onehot = labels
 
             # smooth edge
             # labels_onehot[:, 2, ...] = smooth_transformer(labels_onehot[:, 2, ...])
 
-            loss = loss_function(outputs, labels_onehot)
+            loss = loss_function(outputs, labels)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()

@@ -16,7 +16,7 @@ import models.TransFlowNet_huge as TFN_huge
 import models.TransFlowNet_supstl_top10 as TFN_top10
 import models.TransFlowNet_supstl_top10v2 as TFN_top10v2
 import models.TransFlowNet_supstl_top20 as TFN_top20
-import models.TransFlowNet_supstl_top20v2 as TFN_top20v2
+import models.TransFlowNet_top20 as TFN_top20v2
 import models.flow as flow
 
 

@@ -13,7 +13,6 @@ import torch.nn as nn
 import models.TransFlowNet_huge5_top20 as TFN_huge5_top20
 import models.TransFlowNet_top20 as TFN_top20  # 2stage coarse
 import models.TransFlowNet_huge3_top20 as TFN_huge3_top20
-import models.TransFlowNet_huge2_topk as TFN_huge2_topk
 import models.flow as flow
 
 
@@ -194,11 +193,11 @@ def main():
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = TFN_huge2_topk.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, k=10)
+    model = TFN_huge3_top20.TransFlowNet(args.model_name.lower(), device, args, in_channels=1)
 
     # loss_function = monai.losses.DiceCELoss(softmax=True).to(device)
     loss_function = monai.losses.DiceCELoss(sigmoid=True).to(device)
-    # sloss_function = nn.MSELoss()
+    sloss_function = nn.MSELoss()
 
     initial_lr = args.initial_lr
     optimizer = torch.optim.AdamW(model.parameters(), initial_lr)
@@ -223,13 +222,14 @@ def main():
             optimizer.zero_grad()
 
             # sup s_normal xy_normal
-            # s = flow.get_s(labels)
+            s = flow.get_s(labels)
             # xy = flow.get_t(labels.cpu()).to(device).float()
             trans_f, trans_f_label, hidden_feature, outputs, xy_normal, s_normal, coarse_seg = model(inputs, labels)
 
             loss =  loss_function(coarse_seg, labels) + \
                     loss_function(trans_f, trans_f_label) + \
-                    loss_function(outputs, labels)
+                    loss_function(outputs, labels) + \
+                    0.01 * sloss_function(s_normal, s)
 
             # loss1 = 2 * loss_function(coarse_seg, labels) + loss_function(trans_f, trans_f_label)
             # loss2 = loss_function(outputs, labels) + loss_function(trans_f, trans_f_label)

@@ -32,8 +32,6 @@ class TransBack(nn.Module):
 
     def forward(self, x, xy_normal, s_normal):
         shape_ = x.shape
-        for i in range(xy_normal.shape[1]):
-            xy_normal[:, i, ...] *= shape_[i + 2]
 
         s_flow, t_flow = self.get_st_flows(shape_, x.device)
         s_flow = flow.trans_s_flow(s_flow, 1 / s_normal)
@@ -55,19 +53,15 @@ class TransForward(nn.Module):
         assert self.max_scaling > 0
         self.M = math.log2(self.max_scaling)
 
-        self.conv_span = nn.Conv2d(in_channels, hidden_dim // 2, kernel_size=3, padding=1)
-        self.downSample1 = common.Down(hidden_dim // 2, hidden_dim)
-        self.downSample2 = common.Down(hidden_dim, hidden_dim * 2)
-        self.downSample3 = common.Down(hidden_dim * 2, hidden_dim * 4)
-        self.downSample4 = common.Down(hidden_dim * 4, hidden_dim * 8)
-        self.downSample5 = common.Down(hidden_dim * 8, hidden_dim * 16)
-        self.upSample0 = common.Up(hidden_dim * 16, hidden_dim * 8, False)
-        self.upSample1 = common.Up(hidden_dim * 8, hidden_dim * 4, False)
-        self.upSample2 = common.Up(hidden_dim * 4, hidden_dim * 2, False)
-        self.upSample3 = common.Up(hidden_dim * 2, hidden_dim, False)
-        self.upSample4 = common.Up(hidden_dim, out_channels, False)
+        self.conv_span = nn.Conv2d(in_channels, hidden_dim, kernel_size=1, padding=0)
+        self.downSample1 = common.HugeDown(hidden_dim, hidden_dim * 2)
+        self.downSample2 = common.HugeDown(hidden_dim * 2, hidden_dim * 4)
+        self.downSample3 = common.HugeDown(hidden_dim * 4, hidden_dim * 8)
 
-        self.max_pooling = nn.AdaptiveMaxPool2d(1, return_indices=True)
+        self.upSample1 = common.HugeUp(hidden_dim * 8, hidden_dim * 4, False)
+        self.upSample2 = common.HugeUp(hidden_dim * 4, hidden_dim * 2, False)
+        self.upSample3 = common.HugeUp(hidden_dim * 2, hidden_dim, False)
+        self.conv_reduce = nn.Conv2d(hidden_dim, out_channels, kernel_size=1, padding=0)
 
         self.flatten_pt = nn.Conv2d(in_channels=4, out_channels=4, kernel_size=1, padding=0)
 
@@ -104,27 +98,21 @@ class TransForward(nn.Module):
         ori_shape = x.shape
         ori_feature = x
 
-        # x = self.conv_span(x)  # (b, 16, 512, 512)
-        # # involution
-        # x = self.normal1(x)
-        # params = self.conv_reduce(self.reg_inv(x))  # params (b, 4, 512, 512)
+        # unet-like
+        x = self.conv_span(x)
+        d1 = self.downSample1(x)
+        d2 = self.downSample2(d1)
+        d3 = self.downSample3(d2)
 
-        # unet-like down4
-        x = self.conv_span(x)  # (b, 8, 512, 512)
-        d1 = self.downSample1(x)  # (b, 16, 256, 256)
-        d2 = self.downSample2(d1)  # (b, 32, 128, 128)
-        d3 = self.downSample3(d2)  # (b, 64, 64, 64)
-        d4 = self.downSample4(d3)  # (b, 128, 32, 32)
-        d5 = self.downSample5(d4)
+        u1 = self.upSample1(d3, d2)
+        u2 = self.upSample2(u1, d1)
+        u3 = self.upSample3(u2, x)
+        features = self.conv_reduce(u3)  # (b, 2, 512, 512)          c:0 coarse seg        c:1 learned scale size
 
-        u0 = self.upSample0(d5, d4)
-        u1 = self.upSample1(u0, d3)  # (b, 64, 64, 64)
-        u2 = self.upSample2(u1, d2)  # (b, 32, 128, 128)
-        u3 = self.upSample3(u2, d1)  # (b, 16, 256, 256)
-        features = self.upSample4(u3, x)  # (b, 2, 512, 512)          c:0 coarse seg        c:1 learned scale size
         coarse_seg = features[:, 0, ...].unsqueeze(1)
 
         xy_normal, s_normal = flow.get_normal_image(features, 20, self.M)
+        s_normal = torch.clamp(s_normal, 1, self.max_scaling)
 
         s_flow, t_flow = self.get_st_flows(ori_shape, x.device)
         s_flow = flow.trans_s_flow(s_flow, s_normal)
@@ -145,7 +133,7 @@ class TransFlowNet(nn.Module):
 
     def forward(self, x, label):
         trans_f, trans_f_label, xy_normal, s_normal, coarse_seg = self.trans_forward(x, label)
-        hidden_feature = self.model(trans_f)
+        hidden_feature = self.model(trans_f.detach())
         output = self.trans_back(hidden_feature, xy_normal, s_normal)
-        return trans_f, trans_f_label, hidden_feature, output, xy_normal, s_normal, coarse_seg
+        return trans_f, trans_f_label.detach(), hidden_feature, output, xy_normal, s_normal, coarse_seg
 

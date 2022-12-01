@@ -174,7 +174,8 @@ def get_normal_image(feature, k, M):
     params = flatten_features[idx1, idx2, topk_index]
     params = torch.mean(params, -1).view(b, c, 1, 1)
     s = params[:, 0:1, ...]
-    s_normal = torch.exp2(M * (2 * torch.sigmoid(s) - 1))
+    # s_normal = torch.exp2(M * (2 * torch.sigmoid(s) - 1))
+    s_normal = M * torch.sigmoid(s) + 1
 
     return xy_normal, s_normal
 

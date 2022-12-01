@@ -5,6 +5,7 @@ Adapted form MONAI Tutorial: https://github.com/Project-MONAI/tutorials/tree/mai
 """
 
 import argparse
+import itertools
 import os
 import tqdm
 
@@ -16,7 +17,7 @@ import models.TransFlowNet_huge as TFN_huge
 import models.TransFlowNet_supstl_top10 as TFN_top10
 import models.TransFlowNet_supstl_top10v2 as TFN_top10v2
 import models.TransFlowNet_supstl_top20 as TFN_top20
-import models.TransFlowNet_supstl_top20v2 as TFN_top20v2
+import models.TransFlowNet_top20 as TFN_top20v2
 import models.flow as flow
 
 
@@ -49,7 +50,8 @@ def main():
     parser.add_argument("--max_epochs", default=2000, type=int)
     parser.add_argument("--val_interval", default=2, type=int)
     parser.add_argument("--epoch_tolerance", default=200, type=int)
-    parser.add_argument("--initial_lr", type=float, default=6e-4, help="learning rate")
+    parser.add_argument("--initial_lr1", type=float, default=6e-4, help="learning rate")
+    parser.add_argument("--initial_lr2", type=float, default=6e-4, help="learning rate")
     parser.add_argument("--model_path", type=str, default="unet_sups")
 
     args = parser.parse_args()
@@ -199,14 +201,13 @@ def main():
 
     model = TFN_top10v2.TransFlowNet(args.model_name.lower(), device, args, in_channels=1)
 
-    # model = model_factory(args.model_name.lower(), device, args, in_channels=1)
-
-    # loss_function = monai.losses.DiceCELoss(softmax=True).to(device)
-    loss_function = monai.losses.DiceCELoss(sigmoid=True)
+    loss_function = monai.losses.DiceCELoss(sigmoid=True).to(device)
     sloss_function = nn.MSELoss()
 
-    initial_lr = args.initial_lr
-    optimizer = torch.optim.AdamW(model.parameters(), initial_lr)
+    initial_lr1 = args.initial_lr1
+    initial_lr2 = args.initial_lr2
+    optimizer1 = torch.optim.AdamW(model.trans_forward.parameters(), initial_lr1)
+    optimizer2 = torch.optim.AdamW(itertools.chain(model.model.parameters(), model.trans_back.parameters()), initial_lr2)
     # smooth_transformer = GaussianSmooth(sigma=1)
 
     # start a typical PyTorch training
@@ -215,43 +216,54 @@ def main():
     val_interval = args.val_interval
     best_metric = -1
     best_metric_epoch = -1
-    epoch_loss_values = list()
+    epoch_loss1_values = list()
+    epoch_loss2_values = list()
     metric_values = list()
     torch.autograd.set_detect_anomaly(True)
     writer = SummaryWriter(model_path)
     for epoch in range(1, max_epochs):
         model.train()
-        epoch_loss = 0
+        epoch_loss1 = 0
+        epoch_loss2 = 0
         train_bar = tqdm.tqdm(enumerate(train_loader, 1), total=len(train_loader))
         for step, batch_data in train_bar:
             inputs, labels = batch_data["img"].to(device), batch_data["label"].float().to(device)
-            optimizer.zero_grad()
+            optimizer1.zero_grad()
+            optimizer2.zero_grad()
 
             # sup s_normal xy_normal
-            s = flow.get_s(labels)
-            xy = flow.get_t(labels.cpu()).to(device).float()
+            # s = flow.get_s(labels)
+            # xy = flow.get_t(labels.cpu()).to(device).float()
             trans_f, trans_f_label, hidden_feature, outputs, xy_normal, s_normal, coarse_seg = model(inputs, labels)
 
-            loss1 = loss_function(coarse_seg, labels) + 0.1 * sloss_function(s_normal, s) + 0.001 * sloss_function(xy_normal, xy)
-            loss2 = loss_function(outputs, labels) + loss_function(trans_f, trans_f_label)
+            loss1 = loss_function(coarse_seg, labels)
+            loss2 = 0.5 * loss_function(outputs, labels) + 0.5 * loss_function(trans_f, trans_f_label)
             # loss3 = 0.1 * sloss_function(s_normal, s) + 0.001 * sloss_function(xy_normal, xy)
-            loss = loss1 if epoch <= 20 else loss2
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item()
+            loss1.backward(retain_graph=True)
+            loss2.backward()
+            optimizer1.step()
+            optimizer1.step()
+            epoch_loss1 += loss1.item()
+            epoch_loss2 += loss2.item()
             epoch_len = len(train_ds) // train_loader.batch_size
 
-            train_bar.set_postfix_str(f"train_loss: {loss.item():.4f}")
-            writer.add_scalar("train_loss", loss.item(), epoch_len * epoch + step)
+            train_bar.set_postfix_str(f"train_loss1: {loss1.item():.4f}")
+            train_bar.set_postfix_str(f"train_loss2: {loss2.item():.4f}")
+            writer.add_scalar("train_loss1", loss1.item(), epoch_len * epoch + step)
+            writer.add_scalar("train_loss2", loss2.item(), epoch_len * epoch + step)
 
-        epoch_loss /= step
-        epoch_loss_values.append(epoch_loss)
-        print(f"epoch {epoch} average loss: {epoch_loss:.4f}")
+        epoch_loss1 /= step
+        epoch_loss2 /= step
+        epoch_loss1_values.append(epoch_loss1)
+        epoch_loss2_values.append(epoch_loss2)
+        print(f"epoch {epoch} average loss1: {epoch_loss1:.4f} average loss2: {epoch_loss2:.4f}")
         checkpoint = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "loss": epoch_loss_values,
+            "optimizer1_state_dict": optimizer1.state_dict(),
+            "optimizer2_state_dict": optimizer2.state_dict(),
+            "loss1": epoch_loss1_values,
+            "loss2": epoch_loss2_values
         }
 
         if epoch >= 10 and epoch % val_interval == 0:
@@ -324,7 +336,8 @@ def main():
     np.savez_compressed(
         join(model_path, "train_log.npz"),
         val_dice=metric_values,
-        epoch_loss=epoch_loss_values,
+        epoch_loss1=epoch_loss1_values,
+        epoch_loss2=epoch_loss2_values,
     )
 
 
