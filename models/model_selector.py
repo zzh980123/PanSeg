@@ -2,7 +2,7 @@ import monai
 from monai.networks.nets import *
 from monai.networks.blocks import Warp
 from daformer_coat_net import *
-
+import timm
 
 def model_factory(model_name: str, device, args, in_channels=1, spatial_dims=2, pretrained_model_paths=[]):
     if model_name == 'unet':
@@ -37,6 +37,8 @@ def model_factory(model_name: str, device, args, in_channels=1, spatial_dims=2, 
             feature_size=24,
             spatial_dims=spatial_dims
         ).to(device)
+    if model_name == 'attentionunet':
+        model = timm.create_model()
     if model_name == 'coat':
         model = DaFormaerCoATNet(
             in_channel=in_channels,

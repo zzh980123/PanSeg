@@ -7,7 +7,7 @@ Adapted form MONAI Tutorial: https://github.com/Project-MONAI/tutorials/tree/mai
 import argparse
 import os
 import tqdm
-
+import neurite as ne
 import torch.nn as nn
 
 import models.TransFlowNet_huge5_top20 as TFN_huge5_top20
@@ -194,7 +194,7 @@ def main():
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = TFN_huge2_topk.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, k=10)
+    model = TFN_huge2_topk.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=4, k=20)
 
     # loss_function = monai.losses.DiceCELoss(softmax=True).to(device)
     loss_function = monai.losses.DiceCELoss(sigmoid=True).to(device)
@@ -227,9 +227,9 @@ def main():
             # xy = flow.get_t(labels.cpu()).to(device).float()
             trans_f, trans_f_label, hidden_feature, outputs, xy_normal, s_normal, coarse_seg = model(inputs, labels)
 
-            loss =  loss_function(coarse_seg, labels) + \
-                    loss_function(trans_f, trans_f_label) + \
-                    loss_function(outputs, labels)
+            loss =  0.3 * loss_function(coarse_seg, labels) + \
+                    0.1 * loss_function(trans_f, trans_f_label) + \
+                    0.6 * loss_function(outputs, labels)
 
             # loss1 = 2 * loss_function(coarse_seg, labels) + loss_function(trans_f, trans_f_label)
             # loss2 = loss_function(outputs, labels) + loss_function(trans_f, trans_f_label)
@@ -267,12 +267,14 @@ def main():
                 val_forward_label = None
                 val_coarse_seg = None
 
+
                 for step, val_data in enumerate(val_loader, 1):
                     val_images, val_labels = val_data["img"].to(device), val_data["label"].float().to(device)
 
                     val_labels_onehot = val_labels
 
                     val_forward, val_forward_label, val_hidden_feature, val_outputs, xy_normal, s_normal, coarse_seg = model(val_images, val_labels)
+
                     val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
                     val_hidden_feature = [post_pred(i) for i in decollate_batch(val_hidden_feature)]
                     val_forward = [i for i in decollate_batch(val_forward)]

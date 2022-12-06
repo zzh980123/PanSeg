@@ -107,7 +107,7 @@ class TransForward(nn.Module):
         coarse_seg = features[:, 0, ...].unsqueeze(1)
 
         xy_normal, s_normal = flow.get_normal_image(features, self.k, self.M)
-        s_normal = torch.clamp(s_normal, 1, self.max_scaling)
+        # s_normal = torch.clamp(s_normal, 1, self.max_scaling)
 
         s_flow, t_flow = self.get_st_flows(ori_shape, x.device)
         s_flow = flow.trans_s_flow(s_flow, s_normal)
@@ -119,11 +119,11 @@ class TransForward(nn.Module):
 
 
 class TransFlowNet(nn.Module):
-    def __init__(self, model_name: str, device, args, in_channels=1, out_channels=1, hidden_dim=16, k=20):
+    def __init__(self, model_name: str, device, args, in_channels=1, out_channels=1, hidden_dim=16, max_scaling=4, k=20):
         super(TransFlowNet, self).__init__()
 
         self.model = model_factory(model_name, device, args, in_channels)
-        self.trans_forward = TransForward(in_channels, hidden_dim=hidden_dim, out_channels=2, max_scaling=4, k=k).to(device)
+        self.trans_forward = TransForward(in_channels, hidden_dim=hidden_dim, out_channels=2, max_scaling=max_scaling, k=k).to(device)
         self.trans_back = TransBack(in_channels=in_channels, out_channels=out_channels).to(device)
 
     def forward(self, x, label):

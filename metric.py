@@ -40,12 +40,13 @@ def main():
             pred = torch.Tensor(pred)
             gt = torch.Tensor(gt)
             dice = dice_metric(y_pred=pred, y=gt)
-            hd = hd_metric(y_pred=pred, y=gt)
+            # hd = hd_metric(y_pred=pred, y=gt)
             dice_score = dice_metric.aggregate().item()
-            hd_score = hd_metric.aggregate().item()
+            # hd_score = hd_metric.aggregate().item()
             dice_metric.reset()
             id = predict_names[i].split('.')[0]
-            data = [id, dice_score, hd_score]
+            # data = [id, dice_score, hd_score]
+            data = [id, dice_score]
             writer.writerow(data)
             print(id)
 

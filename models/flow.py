@@ -98,20 +98,15 @@ def trans_t_flow(grid, t: torch.FloatTensor):
 
 def gen_flow_scale(shape_):
     dim_ = len(shape_)
-
     assert dim_ in [1, 2, 3]
-
     xyz = [
         torch.arange(i)
         for i in shape_
     ]
-
     grid = torch.meshgrid(xyz)
-
     mid = [
         i // 2 for i in shape_
     ]
-
     mid = np.expand_dims(np.array(mid, dtype=np.float32), [0] + [i + 2 for i in range(dim_)])
 
     id_grid = torch.stack(grid, 0).unsqueeze(0).type(torch.FloatTensor)
@@ -175,7 +170,8 @@ def get_normal_image(feature, k, M):
     params = torch.mean(params, -1).view(b, c, 1, 1)
     s = params[:, 0:1, ...]
     # s_normal = torch.exp2(M * (2 * torch.sigmoid(s) - 1))
-    s_normal = M * torch.sigmoid(s) + 1
+    # s_normal = M * torch.sigmoid(s) + 1
+    s_normal = M * torch.exp2(torch.sigmoid(s))
 
     return xy_normal, s_normal
 
