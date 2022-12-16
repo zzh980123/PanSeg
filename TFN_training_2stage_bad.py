@@ -10,14 +10,7 @@ import os
 import tqdm
 
 import torch.nn as nn
-import models.TransFlowNet_supstl_d4 as TFN_stl_4
-import models.TransFlowNet_supstlv2_d4 as TFN_stlv2_4
-import models.TransFlowNet_supstl_d5 as TFN_stlv2_5
-import models.TransFlowNet_huge as TFN_huge
-import models.TransFlowNet_supstl_top10 as TFN_top10
-import models.TransFlowNet_supstl_top10v2 as TFN_top10v2
-import models.TransFlowNet_supstl_top20 as TFN_top20
-import models.TransFlowNet_top20 as TFN_top20v2
+import models.TransFlowNet_huge2v2_topk as TFN_huge2v2_topk
 import models.flow as flow
 
 
@@ -50,8 +43,7 @@ def main():
     parser.add_argument("--max_epochs", default=2000, type=int)
     parser.add_argument("--val_interval", default=2, type=int)
     parser.add_argument("--epoch_tolerance", default=200, type=int)
-    parser.add_argument("--initial_lr1", type=float, default=6e-4, help="learning rate")
-    parser.add_argument("--initial_lr2", type=float, default=6e-4, help="learning rate")
+    parser.add_argument("--initial_lr", type=float, default=5e-4, help="learning rate")
     parser.add_argument("--model_path", type=str, default="unet_sups")
 
     args = parser.parse_args()
@@ -199,15 +191,16 @@ def main():
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = TFN_top10v2.TransFlowNet(args.model_name.lower(), device, args, in_channels=1)
+    model = TFN_huge2v2_topk.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=2, k=20)
 
     loss_function = monai.losses.DiceCELoss(sigmoid=True).to(device)
-    sloss_function = nn.MSELoss()
 
-    initial_lr1 = args.initial_lr1
-    initial_lr2 = args.initial_lr2
+    initial_lr1 = args.initial_lr
+    initial_lr2 = args.initial_lr
     optimizer1 = torch.optim.AdamW(model.trans_forward.parameters(), initial_lr1)
     optimizer2 = torch.optim.AdamW(itertools.chain(model.model.parameters(), model.trans_back.parameters()), initial_lr2)
+    scheduler1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer1, T_max=32, eta_min=0, last_epoch=-1)
+    scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer2, T_max=32, eta_min=0, last_epoch=-1)
     # smooth_transformer = GaussianSmooth(sigma=1)
 
     # start a typical PyTorch training
@@ -252,6 +245,8 @@ def main():
             writer.add_scalar("train_loss1", loss1.item(), epoch_len * epoch + step)
             writer.add_scalar("train_loss2", loss2.item(), epoch_len * epoch + step)
 
+        scheduler1.step()
+        scheduler2.step()
         epoch_loss1 /= step
         epoch_loss2 /= step
         epoch_loss1_values.append(epoch_loss1)

@@ -10,7 +10,9 @@ import time
 import SimpleITK as sitk
 import nibabel as nib
 import models.TransFlowNet_huge2_topk as TFN_huge2_topk
-import models.TransFlowNet_huge2v2_topk as TFN_huge2v2_topk
+import flow
+import neurite as ne
+
 
 
 def write2nii(array: np.ndarray, file_name, auto_create=True):
@@ -59,7 +61,7 @@ def main():
     test_labels = [join(label_path, img_names[i]) for i in test_index]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = TFN_huge2v2_topk.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=5, k=20)
+    model = TFN_huge2_topk.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=4, k=10)
 
     # find best model
     model_path = join(args.model_path, 'best_Dice_model.pth')
@@ -100,6 +102,17 @@ def main():
 
                 # output_img = sliding_window_inference(slice_data, roi_size, sw_batch_size, model)
                 img_forward, label_forward, hidden_feature, output_img, xy_normal, s_normal, coarse_seg = model(slice_data, slice_label)
+
+                titles = ["image", "image_forward", "label", "label_forward", "coarse_seg"]
+                ne.plot.slices([slice_data[0, 0, ...], img_forward[0, 0, ...], slice_label[0, 0, ...], label_forward[0, 0, ...], coarse_seg[0, 0, ...]], titles=titles, do_colorbars=True)
+
+                s_flow = flow.gen_flow_scale(slice_data[1:])
+                t_flow = flow.gen_flow_transport(slice_data[1:])
+                s_flow = flow.trans_s_flow(s_flow, s_normal)
+                t_flow = flow.trans_t_flow(t_flow, xy_normal)
+
+                ne.plot.flow([])
+
                 output_img = torch.sigmoid(output_img).cpu()
                 output_img[output_img > 0.5] = 1
                 output_img[output_img < 0.5] = 0

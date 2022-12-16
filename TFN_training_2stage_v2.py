@@ -194,7 +194,7 @@ def main():
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = TFN_huge2v2_topk.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=2, k=20)
+    model = TFN_huge2v2_topk.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=5, k=20)
 
     # loss_function = monai.losses.DiceCELoss(softmax=True).to(device)
     loss_function = monai.losses.DiceCELoss(sigmoid=True).to(device)
@@ -237,6 +237,9 @@ def main():
             # loss2 = loss_function(outputs, labels) + loss_function(trans_f, trans_f_label)
             # loss3 = 0.1 * sloss_function(s_normal, s) + 0.001 * sloss_function(xy_normal, xy)
             # loss = loss1 if epoch <= 50 else loss2
+            if epoch > 100:
+                for param in model.trans_forward.parameters():
+                    param.requires_grad = False
 
             loss.backward()
             optimizer.step()

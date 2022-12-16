@@ -38,7 +38,13 @@ def model_factory(model_name: str, device, args, in_channels=1, spatial_dims=2, 
             spatial_dims=spatial_dims
         ).to(device)
     if model_name == 'attentionunet':
-        model = timm.create_model()
+        model = AttentionUnet(
+            spatial_dims=spatial_dims,
+            in_channels=in_channels,
+            out_channels=args.num_class,
+            channels=(16, 32, 64, 128, 256),
+            strides=(2, 2, 2, 2)
+        ).to(device)
     if model_name == 'coat':
         model = DaFormaerCoATNet(
             in_channel=in_channels,
