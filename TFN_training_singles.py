@@ -45,7 +45,7 @@ def main():
     parser.add_argument("--batch_size", default=4, type=int, help="Batch size per GPU")
     parser.add_argument("--max_epochs", default=2000, type=int)
     parser.add_argument("--val_interval", default=2, type=int)
-    parser.add_argument("--epoch_tolerance", default=100, type=int)
+    parser.add_argument("--epoch_tolerance", default=200, type=int)
     parser.add_argument("--initial_lr", type=float, default=6e-4, help="learning rate")
     parser.add_argument("--model_path", type=str, default="unet_sups")
 
@@ -237,9 +237,6 @@ def main():
             # loss2 = loss_function(outputs, labels) + loss_function(trans_f, trans_f_label)
             # loss3 = 0.1 * sloss_function(s_normal, s) + 0.001 * sloss_function(xy_normal, xy)
             # loss = loss1 if epoch <= 50 else loss2
-            if epoch > 40:
-                for param in model.trans_forward.parameters():
-                    param.requires_grad = False
 
             loss.backward()
             optimizer.step()

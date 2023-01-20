@@ -59,7 +59,7 @@ def main():
     test_labels = [join(label_path, img_names[i]) for i in test_index]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = TFN_huge2v2_topk.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=5, k=20)
+    model = TFN_huge2v2_topk.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=2, k=20)
 
     # find best model
     model_path = join(args.model_path, 'best_Dice_model.pth')

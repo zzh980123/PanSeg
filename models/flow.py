@@ -158,11 +158,16 @@ def get_normal_image(feature, k, M):
     mid = h // 2
     flatten_features = feature.view((b, c, -1))
     _, topk_index = torch.topk(flatten_features[:, 1:, ...], k)
-    y = topk_index // w
-    x = topk_index - y * w
-    mean_y = (torch.mean(y.float(), -1) - mid).reshape(b, 1, 1, 1)
+    # y = topk_index // w
+    # x = topk_index - y * w
+    # mean_y = (torch.mean(y.float(), -1) - mid).reshape(b, 1, 1, 1)
+    # mean_x = (torch.mean(x.float(), -1) - mid).reshape(b, 1, 1, 1)
+    # xy_normal = torch.concat([mean_y, mean_x], 1)
+    x = topk_index // w
+    y = topk_index - x * w - 1
     mean_x = (torch.mean(x.float(), -1) - mid).reshape(b, 1, 1, 1)
-    xy_normal = torch.concat([mean_y, mean_x], 1)
+    mean_y = (torch.mean(y.float(), -1) - mid).reshape(b, 1, 1, 1)
+    xy_normal = torch.concat([mean_x, mean_y], 1)
 
     idx1 = torch.arange(b).view(-1, 1, 1)
     idx2 = torch.arange(c).view(1, -1, 1)
@@ -176,31 +181,63 @@ def get_normal_image(feature, k, M):
     return xy_normal, s_normal
 
 
+def get_normal_image_s(feature, k, M):
+    b, c, h, w = feature.shape
+    mid = h // 2
+    flatten_features = feature.view((b, c, -1))
+    _, topk_index = torch.topk(flatten_features[:, 1:, ...], k)
+    # y = topk_index // w
+    # x = topk_index - y * w
+    # mean_y = (torch.mean(y.float(), -1) - mid).reshape(b, 1, 1, 1)
+    # mean_x = (torch.mean(x.float(), -1) - mid).reshape(b, 1, 1, 1)
+    # xy_normal = torch.concat([mean_y, mean_x], 1)
+    x = topk_index // w
+    y = topk_index - x * w - 1
+    mean_x = (torch.mean(x.float(), -1) - mid).reshape(b, 1, 1, 1)
+    mean_y = (torch.mean(y.float(), -1) - mid).reshape(b, 1, 1, 1)
+    xy_normal = torch.concat([mean_x, mean_y], 1)
+
+    AVGPool = nn.AdaptiveAvgPool2d((1, 1))
+    s = AVGPool(feature[:, 0]).view(b, 1, 1, 1)
+    # s_normal = torch.exp2(M * (2 * torch.sigmoid(s) - 1))
+    # s_normal = M * torch.sigmoid(s) + 1
+    s_normal = M * torch.exp2(torch.sigmoid(s))
+
+    return xy_normal, s_normal
+
+
 if __name__ == '__main__':
-    import utils_medical.preproccess as prp
-    import utils_medical.plot as plot
+    b, c, h, w = 16, 2, 512, 512
+    f = torch.arange(0, b * c * h * w).float().view(b, c, h, w)
+    f = f / (b * c * h * w)
+    xy_normal, s_normal = get_normal_image(f, 20, 2)
+    xy_normal1, s_normal1 = get_normal_image_s(f, 20 ,2)
+    print(f.shape)
 
-    image = prp.read_image("../data/bus.jpg").astype(np.float32)
-    # flow = gen_flow_scale(image.shape[:-1], 1)
-
-    ts_img = torch.from_numpy(image)[None, ...].permute(0, 3, 1, 2)
-    scale = torch.ones(1, 2, 1, 1).type(torch.FloatTensor) * 2
-    t = torch.tensor([200, 200])[None, :, None, None].type(torch.FloatTensor)
-
-    s_flow = trans_s_flow(gen_flow_scale(ts_img.shape[-2:]), scale)
-    t_flow = trans_t_flow(gen_flow_transport(ts_img.shape[-2:]), t)
-
-    sp_trans = SpatialTransformer(image.shape[:-1])
-    compose_flow = s_flow + sp_trans(t_flow, s_flow)
-
-    ts_new = sp_trans(ts_img, compose_flow)
-
-    np_new = ts_new.permute(0, 2, 3, 1).numpy()
-    np_img = ts_img.permute(0, 2, 3, 1).numpy()
-    np_flow = compose_flow.permute(0, 2, 3, 1).numpy()
-
-    import matplotlib.pyplot as plt
-
-    plt.imshow(np_new[0, :, ...] * 255)
-    plt.show()
-    plot.flow([np_flow[0, ::32, ::32, ...]], width=5)
+    # import utils_medical.preproccess as prp
+    # import utils_medical.plot as plot
+    #
+    # image = prp.read_image("../data/bus.jpg").astype(np.float32)
+    # # flow = gen_flow_scale(image.shape[:-1], 1)
+    #
+    # ts_img = torch.from_numpy(image)[None, ...].permute(0, 3, 1, 2)
+    # scale = torch.ones(1, 2, 1, 1).type(torch.FloatTensor) * 2
+    # t = torch.tensor([200, 200])[None, :, None, None].type(torch.FloatTensor)
+    #
+    # s_flow = trans_s_flow(gen_flow_scale(ts_img.shape[-2:]), scale)
+    # t_flow = trans_t_flow(gen_flow_transport(ts_img.shape[-2:]), t)
+    #
+    # sp_trans = SpatialTransformer(image.shape[:-1])
+    # compose_flow = s_flow + sp_trans(t_flow, s_flow)
+    #
+    # ts_new = sp_trans(ts_img, compose_flow)
+    #
+    # np_new = ts_new.permute(0, 2, 3, 1).numpy()
+    # np_img = ts_img.permute(0, 2, 3, 1).numpy()
+    # np_flow = compose_flow.permute(0, 2, 3, 1).numpy()
+    #
+    # import matplotlib.pyplot as plt
+    #
+    # plt.imshow(np_new[0, :, ...] * 255)
+    # plt.show()
+    # plot.flow([np_flow[0, ::32, ::32, ...]], width=5)
