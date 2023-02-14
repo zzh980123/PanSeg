@@ -9,12 +9,7 @@ import os
 import tqdm
 import torch.nn as nn
 
-import models.TransFlowNet_huge5_top20 as TFN_huge5_top20
-import models.TransFlowNet_top20 as TFN_top20  # 2stage coarse
-import models.TransFlowNet_huge3_top20 as TFN_huge3_top20
-import models.TransFlowNet_huge2_topk as TFN_huge2_topk
-import models.TransFlowNet_huge2v2_topk as TFN_huge2v2_topk
-import models.flow as flow
+import TFN
 
 
 def main():
@@ -194,7 +189,7 @@ def main():
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = TFN_huge2v2_topk.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=2, k=20)
+    model = TFN.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=3, k=20)
 
     # loss_function = monai.losses.DiceCELoss(softmax=True).to(device)
     loss_function = monai.losses.DiceCELoss(sigmoid=True).to(device)

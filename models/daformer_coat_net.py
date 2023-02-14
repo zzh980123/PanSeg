@@ -62,3 +62,10 @@ class DaFormaerCoATNet(nn.Module):
         upsample_logit = F.interpolate(logit, size=None, scale_factor=4, mode='bilinear', align_corners=False)
 
         return upsample_logit
+
+
+if __name__ == '__main__':
+    input = torch.randn(16, 1, 512, 512)
+    model = DaFormaerCoATNet(in_channel=1, out_channel=1)
+    output = model(input)
+    print(output.shape)

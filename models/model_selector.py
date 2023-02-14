@@ -50,4 +50,5 @@ def model_factory(model_name: str, device, args, in_channels=1, spatial_dims=2, 
             in_channel=in_channels,
             out_channel=args.num_class,
         ).to(device)
+
     return model

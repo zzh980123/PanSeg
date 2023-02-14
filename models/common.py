@@ -207,13 +207,45 @@ class Up(nn.Module):
         return self.conv(x)
 
 
+class Up4(nn.Module):
+    """Upscaling then double conv"""
+
+    def __init__(self, in_channels, out_channels, bilinear=True):
+        super().__init__()
+
+        # if bilinear, use the normal convolutions to reduce the number of channels
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True)
+            self.conv = HugeConv2dBlock(in_channels, out_channels)
+        else:
+            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=4, stride=4)
+            self.conv = HugeConv2dBlock(in_channels, out_channels)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
+
+
 class HugeDown(nn.Module):
     """Downscaling with maxpool then double conv"""
-
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.maxpool_conv = nn.Sequential(
             nn.MaxPool2d(2),
+            HugeConv2dBlock(in_channels, out_channels)
+        )
+
+    def forward(self, x):
+        return self.maxpool_conv(x)
+
+
+class HugeDown4(nn.Module):
+    """Downscaling with maxpool then double conv"""
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.maxpool_conv = nn.Sequential(
+            nn.MaxPool2d(4),
             HugeConv2dBlock(in_channels, out_channels)
         )
 
@@ -241,11 +273,34 @@ class HugeUp(nn.Module):
         return self.conv(x)
 
 
+class HugeUp4(nn.Module):
+    """Upscaling then double conv"""
+
+    def __init__(self, in_channels, out_channels, bilinear=True):
+        super().__init__()
+
+        # if bilinear, use the normal convolutions to reduce the number of channels
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True)
+            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
+        else:
+            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+            self.conv = DoubleConv(in_channels, out_channels)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
+
 
 if __name__ == '__main__':
     x = torch.randn(4, 4, 224, 224)
+    down = HugeDown4(4, 16)
+    x4 = down(x)
+    up = HugeUp4(20, 4)
+    out = up(x4, x)
     downBlock = Down(4, 16)
     downFeat = downBlock(x)
     upBlock = Up(20, 4)
-    out = upBlock(downFeat, x)
+    out1 = upBlock(downFeat, x)
     print(out.shape)
