@@ -2,6 +2,7 @@ import monai
 from monai.networks.nets import *
 from monai.networks.blocks import Warp
 from daformer_coat_net import *
+from MSTUNet import *
 import timm
 
 def model_factory(model_name: str, device, args, in_channels=1, spatial_dims=2, pretrained_model_paths=[]):
@@ -47,6 +48,11 @@ def model_factory(model_name: str, device, args, in_channels=1, spatial_dims=2, 
         ).to(device)
     if model_name == 'coat':
         model = DaFormaerCoATNet(
+            in_channel=in_channels,
+            out_channel=args.num_class,
+        ).to(device)
+    if model_name == 'mstunet':
+        model = MSTUNet(
             in_channel=in_channels,
             out_channel=args.num_class,
         ).to(device)

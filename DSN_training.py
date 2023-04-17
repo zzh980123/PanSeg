@@ -9,7 +9,7 @@ import os
 import tqdm
 import torch.nn as nn
 
-import TFN
+import DSN
 
 
 def main():
@@ -36,6 +36,8 @@ def main():
     parser.add_argument(
         "--input_size", default=256, type=int, help="segmentation classes"
     )
+    parser.add_argument('--M', default=4, type=float, help='scaling factor M')
+    parser.add_argument('--k', default=20, type=int, help='get top k')
     # Training parameters
     parser.add_argument("--batch_size", default=4, type=int, help="Batch size per GPU")
     parser.add_argument("--max_epochs", default=2000, type=int)
@@ -43,6 +45,7 @@ def main():
     parser.add_argument("--epoch_tolerance", default=200, type=int)
     parser.add_argument("--initial_lr", type=float, default=6e-4, help="learning rate")
     parser.add_argument("--model_path", type=str, default="unet_sups")
+
 
     args = parser.parse_args()
 
@@ -189,7 +192,9 @@ def main():
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = TFN.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=3, k=20)
+    M = args.M
+    k = args.k
+    model = DSN.DeformSegNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=M, k=k)
 
     # loss_function = monai.losses.DiceCELoss(softmax=True).to(device)
     loss_function = monai.losses.DiceCELoss(sigmoid=True).to(device)
@@ -197,7 +202,7 @@ def main():
 
     initial_lr = args.initial_lr
     optimizer = torch.optim.AdamW(model.parameters(), initial_lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=32, eta_min=0, last_epoch=-1)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=32, eta_min=0, last_epoch=-1)
     # smooth_transformer = GaussianSmooth(sigma=1)
 
     # start a typical PyTorch training
@@ -241,7 +246,7 @@ def main():
             train_bar.set_postfix_str(f"train_loss: {loss.item():.4f}")
             writer.add_scalar("train_loss", loss.item(), epoch_len * epoch + step)
 
-        scheduler.step()
+        # scheduler.step()
         epoch_loss /= step
         epoch_loss_values.append(epoch_loss)
         print(f"epoch {epoch} average loss: {epoch_loss:.4f}, current lr: {optimizer.param_groups[0]['lr']}")
@@ -286,7 +291,7 @@ def main():
                         val_data["img_meta_dict"]["filename_or_obj"][0]
                     ), dice)
 
-                # aggregate the final mean f1 score and dice result
+                # aggregate the final mean dice result
                 dice_metric_ = dice_metric.aggregate().item()
                 # reset the status for next validation round
                 dice_metric.reset()

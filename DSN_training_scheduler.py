@@ -7,8 +7,9 @@ Adapted form MONAI Tutorial: https://github.com/Project-MONAI/tutorials/tree/mai
 import argparse
 import os
 import tqdm
+import torch.nn as nn
 
-from models.model_selector import *
+import DSN
 
 
 def main():
@@ -21,7 +22,7 @@ def main():
         help="training data path; subfolders: ges, labels",
     )
     parser.add_argument(
-        "--work_dir", default="debug", help="path where to save models and logs"
+        "--work_dir", default="workdir/zheyi", help="path where to save models and logs"
     )
     parser.add_argument("--seed", default=2022, type=int)
     # parser.add_argument("--resume", default=False, help="resume from checkpoint")
@@ -29,19 +30,22 @@ def main():
 
     # Model parameters
     parser.add_argument(
-        "--model_name", default="swinunetr", help="select mode: unet, unetr, swinunetr, mstunet"
+        "--model_name", default="unet", help="select mode: unet, unetr, swinunetr， swinunetr_dfc_v3"
     )
-    parser.add_argument('--save_name', default='unet')
     parser.add_argument("--num_class", default=3, type=int, help="segmentation classes")
     parser.add_argument(
         "--input_size", default=256, type=int, help="segmentation classes"
     )
+    parser.add_argument('--M', default=4, type=float, help='scaling factor M')
+    parser.add_argument('--k', default=20, type=int, help='get top k')
     # Training parameters
     parser.add_argument("--batch_size", default=4, type=int, help="Batch size per GPU")
     parser.add_argument("--max_epochs", default=2000, type=int)
     parser.add_argument("--val_interval", default=2, type=int)
-    parser.add_argument("--epoch_tolerance", default=30, type=int)
+    parser.add_argument("--epoch_tolerance", default=200, type=int)
     parser.add_argument("--initial_lr", type=float, default=6e-4, help="learning rate")
+    parser.add_argument("--model_path", type=str, default="unet_sups")
+
 
     args = parser.parse_args()
 
@@ -88,7 +92,7 @@ def main():
 
     # %% set training/validation split
     np.random.seed(args.seed)
-    model_path = join(args.work_dir, args.save_name)
+    model_path = join(args.work_dir, args.model_path)
     os.makedirs(model_path, exist_ok=True)
     run_id = datetime.now().strftime("%Y%m%d-%H%M")
     shutil.copyfile(
@@ -138,14 +142,6 @@ def main():
             RandAdjustContrastd(keys=["img"], prob=0.25, gamma=(1, 2)),
             RandGaussianSmoothd(keys=["img"], prob=0.25, sigma_x=(1, 2), sigma_y=(1, 2)),
             RandHistogramShiftd(keys=["img"], prob=0.25, num_control_points=3),
-            # RandZoomd(
-            #     keys=["img", "label"],
-            #     prob=0.3,
-            #     min_zoom=0.6,
-            #     max_zoom=1.5,
-            #     mode=["area", "nearest"],
-            #     padding_mode="constant"
-            # ),
             EnsureTyped(keys=["img", "label"]),
         ]
     )
@@ -196,13 +192,17 @@ def main():
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = model_factory(args.model_name.lower(), device, args, in_channels=1)
+    M = args.M
+    k = args.k
+    model = DSN.DeformSegNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=M, k=k)
 
     # loss_function = monai.losses.DiceCELoss(softmax=True).to(device)
-    loss_function = monai.losses.DiceCELoss(sigmoid=True)
+    loss_function = monai.losses.DiceCELoss(sigmoid=True).to(device)
+    # sloss_function = nn.MSELoss()
 
     initial_lr = args.initial_lr
     optimizer = torch.optim.AdamW(model.parameters(), initial_lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=32, eta_min=0, last_epoch=-1)
     # smooth_transformer = GaussianSmooth(sigma=1)
 
     # start a typical PyTorch training
@@ -219,20 +219,25 @@ def main():
         model.train()
         epoch_loss = 0
         train_bar = tqdm.tqdm(enumerate(train_loader, 1), total=len(train_loader))
+
         for step, batch_data in train_bar:
-            inputs, labels = batch_data["img"].to(device), batch_data["label"].to(device)
+            inputs, labels = batch_data["img"].to(device), batch_data["label"].float().to(device)
             optimizer.zero_grad()
-            # inputs = stain_model(inputs).to(device)
 
-            outputs = model(inputs)
-            # labels_onehot = monai.networks.one_hot(
-            #     labels, args.num_class
-            # )  # (b,cls,256,256)
+            # sup s_normal xy_normal
+            # s = flow.get_s(labels)
+            # xy = flow.get_t(labels.cpu()).to(device).float()
+            trans_f, trans_f_label, hidden_feature, outputs, xy_normal, s_normal, coarse_seg = model(inputs, labels)
 
-            # smooth edge
-            # labels_onehot[:, 2, ...] = smooth_transformer(labels_onehot[:, 2, ...])
+            loss =  0.4 * loss_function(coarse_seg, labels) + \
+                    0.2 * loss_function(trans_f, trans_f_label) + \
+                    0.4 * loss_function(outputs, labels)
 
-            loss = loss_function(outputs, labels)
+            # loss1 = 2 * loss_function(coarse_seg, labels) + loss_function(trans_f, trans_f_label)
+            # loss2 = loss_function(outputs, labels) + loss_function(trans_f, trans_f_label)
+            # loss3 = 0.1 * sloss_function(s_normal, s) + 0.001 * sloss_function(xy_normal, xy)
+            # loss = loss1 if epoch <= 50 else loss2
+
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -241,9 +246,10 @@ def main():
             train_bar.set_postfix_str(f"train_loss: {loss.item():.4f}")
             writer.add_scalar("train_loss", loss.item(), epoch_len * epoch + step)
 
+        scheduler.step()
         epoch_loss /= step
         epoch_loss_values.append(epoch_loss)
-        print(f"epoch {epoch} average loss: {epoch_loss:.4f}")
+        print(f"epoch {epoch} average loss: {epoch_loss:.4f}, current lr: {optimizer.param_groups[0]['lr']}")
         checkpoint = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
@@ -251,40 +257,33 @@ def main():
             "loss": epoch_loss_values,
         }
 
-        if epoch >= 20 and epoch % val_interval == 0:
+        if epoch >= 10 and epoch % val_interval == 0:
             model.eval()
             with torch.no_grad():
                 val_images = None
                 val_labels = None
                 val_outputs = None
+                val_hidden_feature = None
+                val_forward = None
+                val_forward_label = None
+                val_coarse_seg = None
 
 
                 for step, val_data in enumerate(val_loader, 1):
-                    val_images, val_labels = val_data["img"].to(device), val_data["label"].to(device)
-
-                    # val_images = stain_model(val_images).to(device)
+                    val_images, val_labels = val_data["img"].to(device), val_data["label"].float().to(device)
 
                     val_labels_onehot = val_labels
-                    roi_size = (args.input_size, args.input_size)
-                    sw_batch_size = args.batch_size
 
-                    val_outputs = sliding_window_inference(
-                        val_images, roi_size, sw_batch_size, model
-                    )
+                    val_forward, val_forward_label, val_hidden_feature, val_outputs, xy_normal, s_normal, coarse_seg = model(val_images, val_labels)
+
                     val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
+                    val_hidden_feature = [post_pred(i) for i in decollate_batch(val_hidden_feature)]
+                    val_forward = [i for i in decollate_batch(val_forward)]
+                    val_coarse_seg = [i for i in decollate_batch(coarse_seg)]
+
                     val_labels_onehot = [
                         post_gt(i) for i in decollate_batch(val_labels_onehot)
                     ]
-
-                    # outputs_pred_npy = val_outputs[0][0].cpu().numpy()
-                    # outputs_label_npy = val_labels_onehot[0][0].cpu().numpy()
-                    # # convert probability map to binary mask and apply morphological postprocessing
-                    # outputs_pred_mask = measure.label(morphology.remove_small_objects(morphology.remove_small_holes(outputs_pred_npy > 0.5), 16))
-                    # outputs_label_mask = measure.label(morphology.remove_small_objects(morphology.remove_small_holes(outputs_label_npy > 0.5), 16))
-
-                    # # convert back to tensor for metric computing
-                    # outputs_pred_mask = torch.from_numpy(outputs_pred_mask[None, None])
-                    # outputs_label_mask = torch.from_numpy(outputs_label_mask[None, None])
 
                     dice = dice_metric(y_pred=val_outputs, y=val_labels_onehot)
 
@@ -292,7 +291,7 @@ def main():
                         val_data["img_meta_dict"]["filename_or_obj"][0]
                     ), dice)
 
-                # aggregate the final mean f1 score and dice result
+                # aggregate the final mean dice result
                 dice_metric_ = dice_metric.aggregate().item()
                 # reset the status for next validation round
                 dice_metric.reset()
@@ -312,6 +311,10 @@ def main():
                 plot_2d_or_3d_image(val_images, epoch, writer, index=0, tag="image")
                 plot_2d_or_3d_image(val_labels, epoch, writer, index=0, tag="label")
                 plot_2d_or_3d_image(val_outputs, epoch, writer, index=0, tag="output", max_channels=3)
+                plot_2d_or_3d_image(val_hidden_feature, epoch, writer, index=0, tag="hidden")
+                plot_2d_or_3d_image(val_forward, epoch, writer, index=0, tag="forward")
+                plot_2d_or_3d_image(val_forward_label, epoch, writer, index=0, tag="forward_label")
+                plot_2d_or_3d_image(val_coarse_seg, epoch, writer, index=0, tag="coarse_seg")
             if (epoch - best_metric_epoch) > epoch_tolerance:
                 print(
                     f"validation metric does not improve for {epoch_tolerance} epochs! current {epoch=}, {best_metric_epoch=}"

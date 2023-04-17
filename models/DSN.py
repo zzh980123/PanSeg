@@ -118,9 +118,9 @@ class TransForward(nn.Module):
         return trans_f, trans_f_label, xy_normal, s_normal, coarse_seg
 
 
-class TransFlowNet(nn.Module):
+class DeformSegNet(nn.Module):
     def __init__(self, model_name: str, device, args, in_channels=1, out_channels=1, hidden_dim=16, max_scaling=4, k=20):
-        super(TransFlowNet, self).__init__()
+        super(DeformSegNet, self).__init__()
 
         self.model = model_factory(model_name, device, args, in_channels)
         self.trans_forward = TransForward(in_channels, hidden_dim=hidden_dim, out_channels=2, max_scaling=max_scaling, k=k).to(device)

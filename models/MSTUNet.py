@@ -6,6 +6,17 @@ from decoder_unet import UnetDecoder
 #################################################################
 
 
+class SingleUpSample(nn.Module):
+    def __init__(self, scale_factor=2, mode='bilinear'):
+        super().__init__()
+        self.scale_factor = scale_factor
+        self.mode = mode
+
+    def forward(self, x):
+        x = F.interpolate(x, scale_factor=self.scale_factor, mode=self.mode)
+        return x
+
+
 class MixUpSample(nn.Module):
     def __init__(self, scale_factor=2):
         super().__init__()
@@ -26,11 +37,13 @@ class MSTUNet(nn.Module):
                  encoder_ckpt=None,
                  ):
         super(MSTUNet, self).__init__()
-        decoder_dim_unet = [128, 64, 32, 16]
+        decoder_dim_unet = [512, 256, 128, 64]
         
         # ----
-        self.encoders_msformer = encoder(in_chans=in_channel)
-        encoder_dim = [16, 32, 64, 128]
+        embed_dims = [32, 64, 128, 256]
+        encoder_dim = [64, 128, 256, 512]
+        self.encoders_msformer = encoder(in_chans=in_channel, embed_dims=embed_dims)
+
         # [64, 128, 320, 512]
         
         self.decoders_unet = torch.nn.ModuleList()
@@ -48,7 +61,7 @@ class MSTUNet(nn.Module):
             nn.Conv2d(decoder_dim_unet[-1], out_channel, kernel_size=1),
         )
         self.interpolate = MixUpSample(scale_factor=4)
-
+        # self.interpolate = SingleUpSample(scale_factor=4, mode='nearest')
 
     def forward(self, x):
         B, C, H, W = x.shape
@@ -74,39 +87,7 @@ class MSTUNet(nn.Module):
         return upsample_logit
 
 
-def run_check_net():
-    batch_size = 2
-    image_size = 800
-    
-    # ---
-    batch = {
-        'image': torch.from_numpy(np.random.uniform(-1, 1, (batch_size, 3, image_size, image_size))).float(),
-        'mask': torch.from_numpy(np.random.choice(2, (batch_size, 1, image_size, image_size))).float(),
-        'organ': torch.from_numpy(np.random.choice(5, (batch_size, 1))).long(),
-    }
-    batch = {k: v.cuda() for k, v in batch.items()}
-    
-    net = MSTUNet().cuda()
-    with torch.no_grad():
-        with torch.cuda.amp.autocast(enabled=True):
-            output = net(batch)
-    
-    print('batch')
-    for k, v in batch.items():
-        print('%32s :' % k, v.shape)
-    
-    print('output')
-    for k, v in output.items():
-        if 'loss' not in k:
-            print('%32s :' % k, v.shape)
-    for k, v in output.items():
-        if 'loss' in k:
-            print('%32s :' % k, v.item())
-
-
-# main #################################################################
 if __name__ == '__main__':
-    # run_check_net()
     input = torch.randn(16, 1, 512, 512)
     model = MSTUNet(in_channel=1, out_channel=1)
     output = model(input)

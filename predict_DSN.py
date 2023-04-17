@@ -10,7 +10,7 @@ import time
 import SimpleITK as sitk
 import nibabel as nib
 
-import models.TFN as TFN
+import models.DSN as DSN
 
 
 def write2nii(array: np.ndarray, file_name, auto_create=True):
@@ -38,7 +38,9 @@ def main():
     # Model parameters
     parser.add_argument('--model_name', default='swinunetrv2', help='select mode: unet, unetr, swinunetr，swinunetrv2')
     parser.add_argument('--num_class', default=1, type=int, help='segmentation classes')
-    parser.add_argument('--input_size', default=512, type=int, help='segmentation classes')
+    parser.add_argument('--input_size', default=512, type=int, help='input size')
+    parser.add_argument('--M', default=4, type=int, help='scaling factor M')
+    parser.add_argument('--k', default=20, type=int, help='get top k')
     args = parser.parse_args()
 
     input_path = args.input_path
@@ -60,10 +62,15 @@ def main():
     test_labels = [join(label_path, img_names[i]) for i in test_index]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = TFN.TransFlowNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=4, k=20)
+    M = args.M
+    k = args.k
+    model = DSN.DeformSegNet(args.model_name.lower(), device, args, in_channels=1, max_scaling=M, k=k)
 
     # find best model
     model_path = join(args.model_path, 'best_Dice_model.pth')
+
+    # # final model
+    # model_path = join(args.model_path, 'final_model.pth')
 
     print(f"Loading {model_path}...")
     checkpoint = torch.load(model_path, map_location=torch.device(device))

@@ -149,7 +149,6 @@ class DWCPatchEmbed(nn.Module):
     ):
         super().__init__()
 
-        # TODO : confirm whether act_layer is effective or not
         self.patch_conv = DWConv2d_BN(
             in_chans,
             embed_dim,
@@ -554,7 +553,7 @@ def dpr_generator(drop_path_rate, num_layers, num_stages):
 
 
 class MSFormer(nn.Module):
-    """Multi-Path ViT class."""
+    """Multi-scale ViT class."""
 
     def __init__(
         self,

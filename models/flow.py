@@ -199,8 +199,6 @@ def get_normal_image_s(feature, k, M):
 
     AVGPool = nn.AdaptiveAvgPool2d((1, 1))
     s = AVGPool(feature[:, 0]).view(b, 1, 1, 1)
-    # s_normal = torch.exp2(M * (2 * torch.sigmoid(s) - 1))
-    # s_normal = M * torch.sigmoid(s) + 1
     s_normal = M * torch.exp2(torch.sigmoid(s))
 
     return xy_normal, s_normal
@@ -208,11 +206,13 @@ def get_normal_image_s(feature, k, M):
 
 if __name__ == '__main__':
     b, c, h, w = 16, 2, 512, 512
-    f = torch.arange(0, b * c * h * w).float().view(b, c, h, w)
-    f = f / (b * c * h * w)
-    xy_normal, s_normal = get_normal_image(f, 20, 2)
-    xy_normal1, s_normal1 = get_normal_image_s(f, 20 ,2)
-    print(f.shape)
+    # f = torch.arange(0, b * c * h * w).float().view(b, c, h, w)
+    # f = f / (b * c * h * w)
+    # xy_normal, s_normal = get_normal_image(f, 20, 2)
+    # xy_normal1, s_normal1 = get_normal_image_s(f, 20 ,2)
+    # print(f.shape)
+    grid = gen_flow_scale((h, w))
+    print(grid)
 
     # import utils_medical.preproccess as prp
     # import utils_medical.plot as plot

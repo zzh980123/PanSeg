@@ -36,7 +36,10 @@ def main():
             gt = sitk.GetArrayFromImage(sitk.ReadImage(gt_file[i]))
             pred = np.swapaxes(np.expand_dims(pred, 0), 1, 3)
             gt = np.swapaxes(np.expand_dims(gt, 0), 1, 3)
-            gt.dtype = np.int16
+            if (gt.dtype == np.uint16):
+                gt.dtype = np.int16
+            if (gt.dtype == np.uint8):
+                gt.dtype = np.int8
             pred = torch.Tensor(pred)
             gt = torch.Tensor(gt)
             dice = dice_metric(y_pred=pred, y=gt)
